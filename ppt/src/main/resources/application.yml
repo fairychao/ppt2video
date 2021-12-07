@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: ppt
+  jackson:
+    time-zone: GMT+8
+    date-format: yyyy-MM-dd HH:mm:ss
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+      enabled: true
+aipSpeech:
+  connectionTimeout: 10000
+  socketTimeout: 60000
+  maxTextLong: 1024
+baiduSpeech:
+  appId:
+  apiKey:
+  secretKey:
+file:
+  separate: \
+  filePath: d:\tmp\tmp\
