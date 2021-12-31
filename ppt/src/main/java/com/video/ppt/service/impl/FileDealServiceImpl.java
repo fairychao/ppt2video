@@ -6,9 +6,18 @@ import com.video.ppt.service.FileDealService;
 import com.video.ppt.service.TtsService;
 import com.spire.presentation.*;
 import org.apache.commons.lang.StringUtils;
+import org.apache.poi.sl.draw.DrawFactory;
+import org.apache.poi.sl.draw.DrawPictureShape;
+import org.apache.poi.sl.draw.Drawable;
+import org.apache.poi.sl.draw.ImageRenderer;
+import org.apache.poi.sl.usermodel.PictureData;
+import org.apache.poi.xslf.usermodel.*;
 import org.bytedeco.ffmpeg.global.avcodec;
 import org.bytedeco.ffmpeg.global.avutil;
 import org.bytedeco.javacv.*;
+import org.bytedeco.javacv.Frame;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -16,8 +25,11 @@ import org.springframework.web.multipart.MultipartFile;
 
 import javax.imageio.ImageIO;
 import javax.servlet.http.HttpServletResponse;
+import java.awt.*;
+import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 import java.io.*;
+import java.lang.ref.WeakReference;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -27,12 +39,16 @@ import java.util.Map;
 
 @Service("fileDealService")
 public class FileDealServiceImpl implements FileDealService {
+    protected static final Logger LOGGER = LoggerFactory.getLogger(FileDealServiceImpl.class);
 
     @Value("${file.filePath}")
     public String filePath;
 
     @Value("${file.separate}")
     public String separate;
+
+    @Value("${img.handler}")
+    public String imgHandler;
 
     @Autowired
     private TtsService ttsService;
@@ -42,6 +58,105 @@ public class FileDealServiceImpl implements FileDealService {
      */
     @Override
     public String getVideo(SpeechForm speechForm) {
+        String inFileName = speechForm.getFileName();
+
+        String saveFileName = inFileName.substring(inFileName.lastIndexOf(separate) + 1);
+        saveFileName = saveFileName.substring(0, saveFileName.indexOf("."));
+        String mp4Path = filePath + saveFileName + ".mp4";
+        try {
+
+            if ("poi".equals(imgHandler)) {
+                processPoi(speechForm);
+            } else {
+                processSpire(speechForm);
+            }
+        } catch (Exception e) {
+            throw new RRException("合成视频失败");
+        }
+
+        return mp4Path;
+
+    }
+
+    private String processPoi(SpeechForm speechForm) {
+        String inFileName = speechForm.getFileName();
+
+        String saveFileName = inFileName.substring(inFileName.lastIndexOf(separate) + 1);
+        saveFileName = saveFileName.substring(0, saveFileName.indexOf("."));
+        String mp4Path = filePath + saveFileName + ".mp4";
+
+        try {
+            //加载PowerPoint文档
+            XMLSlideShow ppt = new XMLSlideShow(new FileInputStream(speechForm.getFileName()));
+
+            //获取幻灯片中的备注内容
+            Map<Integer, String> audioMap = new HashMap<Integer, String>();
+            Map<Integer, String> imgMap = new HashMap<Integer, String>();
+            List<String> buff = new ArrayList<>();
+
+            // 获取大小
+            Dimension pgsize = ppt.getPageSize();
+            double scale = 1.5;
+            int width = (int) (pgsize.width * scale);
+            int height = (int) (pgsize.height * scale);
+            // 获取幻灯片
+            List<XSLFSlide> slides = ppt.getSlides();
+
+            for (int i = 0; i < slides.size(); i++) {
+                LOGGER.info("循环 1 " + width + height);
+                //根据幻灯片大小生成图片
+                //根据幻灯片大小生成图片
+                BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+                Graphics2D graphics = img.createGraphics();
+
+                graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+                graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+                graphics.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
+                graphics.setRenderingHint(Drawable.BUFFERED_IMAGE, new WeakReference<>(img));
+                graphics.scale(scale, scale);
+                graphics.setPaint(Color.white);
+                graphics.fill(new Rectangle2D.Float(0, 0, width, height));
+                // 最核心的代码
+                slides.get(i).draw(graphics);
+                LOGGER.info("循环 2 ");
+                String imgName = String.format("%sToImage-%d.png", filePath, i);
+                ImageIO.write(img, "PNG", new File(imgName));
+
+                XSLFNotes xslfNotes = slides.get(i).getNotes();
+                String notes = null;
+                for (XSLFShape shape : xslfNotes) {
+                    if (shape instanceof XSLFTextShape) {
+                        XSLFTextShape txShape = (XSLFTextShape) shape;
+                        for (XSLFTextParagraph xslfParagraph : txShape.getTextParagraphs()) {
+                            notes = notes + xslfParagraph.getText();
+                        }
+                    }
+                }
+                if (StringUtils.isBlank(notes)) {
+                    buff.add("NA");
+                    imgMap.put(i, imgName);
+                    audioMap.put(i, null);
+
+                } else {
+                    buff.add(notes);
+                    String ttsName = filePath + i + ".mp3";
+                    ttsService.ttsChange(notes, speechForm, ttsName);
+                    imgMap.put(i, imgName);
+                    audioMap.put(i, ttsName);
+                }
+            }
+            LOGGER.info("一阶段结束");
+            mergeAudioAndVideo(mp4Path, imgMap, audioMap, 2160, 1215);
+            LOGGER.info("二阶段结束");
+        } catch (Exception e) {
+            throw new RRException("合成视频失败");
+        }
+
+        return mp4Path;
+    }
+
+    private String processSpire(SpeechForm speechForm) {
         String inFileName = speechForm.getFileName();
 
         String saveFileName = inFileName.substring(inFileName.lastIndexOf(separate)+1);
@@ -57,12 +172,15 @@ public class FileDealServiceImpl implements FileDealService {
             Map<Integer, String> imgMap = new HashMap<Integer, String>();
             List<String> buff = new ArrayList<>();
 
+            LOGGER.info("开始");
             //获取第一张幻灯片
             for (int i = 0; i < ppt.getSlides().size(); i++) {
                 ISlide slide = ppt.getSlides().get(i);
                 //将幻灯片保存为BufferedImage对象
+                LOGGER.info("循环 1 ");
                 BufferedImage image = slide.saveAsImage(2160, 1215);
                 //将BufferedImage保存为PNG格式文件
+                LOGGER.info("循环 2 ");
                 String imgName =  String.format("%sToImage-%d.png", filePath, i);
                 ImageIO.write(image, "PNG", new File(imgName));
 
@@ -74,12 +192,15 @@ public class FileDealServiceImpl implements FileDealService {
 
                 } else {
                     buff.add(notes);
-                    String path = ttsService.ttsChange(notes, speechForm, i);
+                    String ttsName = filePath + i + ".mp3";
+                    ttsService.ttsChange(notes, speechForm, ttsName);
                     imgMap.put(i, imgName);
-                    audioMap.put(i, path);
+                    audioMap.put(i, ttsName);
                 }
             }
+            LOGGER.info("一阶段结束");
             mergeAudioAndVideo(mp4Path, imgMap, audioMap, 2160, 1215);
+            LOGGER.info("二阶段结束");
             ppt.dispose();
         } catch (Exception e) {
             throw new RRException("合成视频失败");
@@ -94,11 +215,11 @@ public class FileDealServiceImpl implements FileDealService {
      * 上传
      */
     @Override
-    public String upload(MultipartFile file){
+    public String upload(MultipartFile file) {
         String saveFilePath = filePath;
 
         String inFileName = file.getOriginalFilename();
-        String saveFileName = inFileName.substring(inFileName.lastIndexOf(separate)+1);
+        String saveFileName = inFileName.substring(inFileName.lastIndexOf(separate) + 1);
 
         saveFilePath = saveFilePath + saveFileName;
 
@@ -154,7 +275,7 @@ public class FileDealServiceImpl implements FileDealService {
                 }
                 os.flush();
             }
-        }catch (Exception e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
 
@@ -179,7 +300,7 @@ public class FileDealServiceImpl implements FileDealService {
             recorder.start();
             Java2DFrameConverter converter = new Java2DFrameConverter();
 
-            for (int k=0; k<imgMap.size(); k++) {
+            for (int k = 0; k < imgMap.size(); k++) {
                 //抓取音频帧
                 FrameGrabber audioGrabber = new FFmpegFrameGrabber(audioMap.get(k));
                 audioGrabber.start();

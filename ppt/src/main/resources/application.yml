@@ -20,3 +20,5 @@ baiduSpeech:
 file:
   separate: \
   filePath: d:\tmp\tmp\
+img:
+  handler: spire    # poi 或者  spire

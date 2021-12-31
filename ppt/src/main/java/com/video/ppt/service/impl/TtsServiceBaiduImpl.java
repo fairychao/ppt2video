@@ -7,7 +7,11 @@ import com.video.ppt.common.factory.SpeechFactory;
 import com.video.ppt.form.SpeechForm;
 import com.video.ppt.service.TtsService;
 import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -15,6 +19,7 @@ import java.util.HashMap;
 
 @Service("ttsService")
 public class TtsServiceBaiduImpl implements TtsService {
+    protected static final Logger LOGGER = LoggerFactory.getLogger(TtsServiceBaiduImpl.class);
 
     @Value("${aipSpeech.connectionTimeout}")
     private int CONNECTION_TIMEOUT;
@@ -24,10 +29,11 @@ public class TtsServiceBaiduImpl implements TtsService {
     public String filePath;
 
     @Override
-    public String ttsChange(String buff, SpeechForm speechForm, int num) {
-        //设置APPID/AK/SK
+    @Async("taskExecutor")
+    public void ttsChange(String buff, SpeechForm speechForm, String fileName) {
 
-        String fileName = filePath + num + ".mp3";
+        LOGGER.info("线程 " + fileName );
+        //Thread.sleep(2000);
 
         // 初始化一个AipSpeech
         AipSpeech client = SpeechFactory.getBaiduInstance();
@@ -42,7 +48,8 @@ public class TtsServiceBaiduImpl implements TtsService {
 
         // 可选：设置log4j日志输出格式，若不设置，则使用默认配置
         // 也可以直接通过jvm启动参数设置此环境变量
-//        System.setProperty("aip.log4j.conf", "path/to/your/log4j.properties");
+        //        System.setProperty("aip.log4j.conf", "path/to/your/log4j.properties");
+
 
         // 设置可选参数
         HashMap<String, Object> options = new HashMap<String, Object>();
@@ -65,8 +72,5 @@ public class TtsServiceBaiduImpl implements TtsService {
         if (res1 != null) {
             System.out.println(res1.toString(2));
         }
-
-        return fileName;
-
     }
 }

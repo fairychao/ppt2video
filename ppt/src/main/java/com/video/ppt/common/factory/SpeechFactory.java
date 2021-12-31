@@ -21,6 +21,7 @@ public class SpeechFactory implements InitializingBean {
         try {
             if (baiduInstance == null) {
                 baiduInstance = new AipSpeech(BAIDU_APPID, BAIDU_APIKEY, BAIDU_SECRETKEY);
+                System.out.println(" init baiduInstance");
             }
         } catch (Exception e) {
         }
